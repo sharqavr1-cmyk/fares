@@ -2,8 +2,6 @@ import asyncio
 import os
 from pyrogram import Client
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream          # <-- التغيير الأساسي هنا
-from pytgcalls.types import AudioParameters, AudioQuality
 
 # ========== متغيرات البيئة (من Railway) ==========
 API_ID = int(os.environ.get("API_ID"))
@@ -39,15 +37,10 @@ async def main():
         print(f"❌ الخطأ: الملف {file_path} مش موجود")
         return
     
-    # بدء البث - باستخدام MediaStream
+    # بدء البث - الطريقة البسيطة للإصدار 2.x
     await app.play(
         CHANNEL_ID,
-        MediaStream(                            # <-- استخدام MediaStream بدلاً من Stream
-            file_path,
-            audio_parameters=AudioParameters(
-                bitrate=AudioQuality.BITRATE_HIGH,
-            )
-        )
+        file_path  # <--- بس كده، من غير أي تعقيدات
     )
     
     print(f"🎙️ جاري تشغيل: {AUDIO_FILE}")
