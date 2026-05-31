@@ -2,18 +2,17 @@ import asyncio
 import os
 from pyrogram import Client
 from pytgcalls import PyTgCalls
+from pytgcalls.types import AudioQuality, AudioParameters
+from pytgcalls.types.stream import Stream
 
-# المتغيرات من Railway
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
 CHANNEL_ID = int(os.environ.get("CHANNEL_ID"))
 
-# إعدادات الملف الصوتي
 AUDIO_FOLDER = "audio"
 AUDIO_FILE = "baqarah.mp3"
 
-# تهيئة العميل
 userbot = Client(
     "userbot_session",
     api_id=API_ID,
@@ -21,28 +20,29 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# تهيئة المكالمات الصوتية
 app = PyTgCalls(userbot)
 
 async def main():
-    # بدء تشغيل العميل والمكالمات
     await app.start()
     await userbot.start()
-
     print(f"✅ تم تشغيل اليوزر بوت: {(await userbot.get_me()).first_name}")
 
-    # تحديد مسار الملف الصوتي
     file_path = os.path.join(AUDIO_FOLDER, AUDIO_FILE)
+    if not os.path.exists(file_path):
+        print(f"❌ الملف {file_path} مش موجود")
+        return
 
-    # بدء البث
-    await app.play(CHANNEL_ID, file_path)
-
+    await app.play(
+        CHANNEL_ID,
+        Stream(
+            file_path,
+            AudioParameters(
+                bitrate=AudioQuality.BITRATE_HIGH,
+            )
+        )
+    )
     print(f"🎙️ جاري تشغيل: {AUDIO_FILE}")
-
-    # إرسال رسالة تأكيد في القناة
     await userbot.send_message(CHANNEL_ID, "🎙️ **بدء بث القرآن الكريم**")
-
-    # إبقاء البرنامج قيد التشغيل
     await asyncio.Event().wait()
 
 asyncio.run(main())
