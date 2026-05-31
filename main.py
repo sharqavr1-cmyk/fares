@@ -1,16 +1,16 @@
 import asyncio
 import os
 from pyrogram import Client
-from py_tgcalls import PyTgCalls
-from py_tgcalls import idle
-from py_tgcalls.types import MediaStream
+from pytgcalls import PyTgCalls
+from pytgcalls import idle
+from pytgcalls.types import AudioStream  # استخدام AudioStream بدلاً من MediaStream
 
-# ========== متغيرات البيئة (من Railway) ==========
+# ========== قراءة متغيرات البيئة ==========
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
 CHAT_ID = int(os.environ.get("CHAT_ID"))          # مثال: -1001234567890
-AUDIO_FILE = "audio/baqarah.mp3"                 # الملف المحلي
+AUDIO_FILE = "audio/baqarah.mp3"                 # الملف الصوتي المحلي
 
 # ========== تهيئة العميل ==========
 client = Client(
@@ -23,7 +23,7 @@ client = Client(
 pytgcalls = PyTgCalls(client)
 
 async def main():
-    print("🚀 جاري بدء تشغيل البوت...")
+    print("🚀 جاري بدء تشغيل البوت (Python 3.8 - pytgcalls 3.0.0.dev24)...")
     await client.start()
     await pytgcalls.start()
     
@@ -33,13 +33,16 @@ async def main():
         return
     
     # بدء البث في المحطة الصوتية
-    await pytgcalls.play(CHAT_ID, MediaStream(AUDIO_FILE))
-    print(f"🎙️ جاري بث {AUDIO_FILE} في الدردشة {CHAT_ID}")
+    await pytgcalls.play(CHAT_ID, AudioStream(AUDIO_FILE))
+    print(f"🎙️ جاري بث {AUDIO_FILE} في المحطة الصوتية للدردشة {CHAT_ID}")
     
     # إرسال رسالة تأكيد في القناة (اختياري)
-    await client.send_message(CHAT_ID, "🎙️ **بدء بث القرآن الكريم**")
+    try:
+        await client.send_message(CHAT_ID, "🎙️ **بدء بث القرآن الكريم**")
+    except Exception as e:
+        print(f"⚠️ لم نتمكن من إرسال رسالة التأكيد: {e}")
     
-    # البقاء شغالاً
+    # البقاء شغالاً (بدون حلقة لا نهائية يدوية)
     await idle()
 
 if __name__ == "__main__":
