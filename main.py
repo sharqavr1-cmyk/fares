@@ -1,9 +1,9 @@
 import asyncio
 import os
 from pyrogram import Client
-from pytgcalls import PyTgCalls
-from pytgcalls import idle
-from pytgcalls.types import MediaStream
+from py_tgcalls import PyTgCalls
+from py_tgcalls import idle
+from py_tgcalls.types import MediaStream
 
 # ========== متغيرات البيئة (من Railway) ==========
 API_ID = int(os.environ.get("API_ID"))
