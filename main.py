@@ -1,40 +1,61 @@
-import asyncio
 import os
-from pyrogram import Client
-from pytgcalls import PyTgCalls
-from pytgcalls import idle  # هذا السطر مهم للبقاء
+import sys
+import subprocess
+import asyncio
 
-# ------------------- الإعدادات ------------------
-API_ID = int(os.environ.get("API_ID", 0))
-API_HASH = os.environ.get("API_HASH", "")
-SESSION_STRING = os.environ.get("SESSION_STRING", "")
-CHAT_ID = int(os.environ.get("CHAT_ID", 0))
+# ========================================================
+# 1. نظام التثبيت الذكي (لنسخة pytgcalls 3.0.0.dev24)
+# ========================================================
+try:
+    from pyrogram import Client
+    from pytgcalls import PyTgCalls, idle
+    from pytgcalls.types import MediaStream
+except ImportError:
+    print("[!] المكتبات غير موجودة. جاري التثبيت التلقائي للإصدار المطلوب...")
+    # استخدام المجلد الحالي كمساحة عمل مؤقتة لتجنب مشاكل المساحة
+    os.environ["TMPDIR"] = os.getcwd()
 
-AUDIO_FILE = "audio/baqarah.mp3"
-# ------------------------------------------------
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--no-cache-dir", "--prefix", ".local",
+         "pyrogram==2.0.106", "pytgcalls==3.0.0.dev24", "tgcrypto"],
+        check=True
+    )
+    print("[✅] تم تثبيت المكتبات بنجاح. جاري إعادة تشغيل البوت...")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
-if not os.path.exists(AUDIO_FILE):
-    raise FileNotFoundError(f"الملف الصوتي غير موجود: {AUDIO_FILE}")
+# ========================================================
+# 2. إعدادات البوت (من متغيرات البيئة)
+# ========================================================
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+SESSION_STRING = os.environ.get("SESSION_STRING")
+CHAT_ID = int(os.environ.get("CHAT_ID"))          # مثال: -1001234567890
+AUDIO_FILE = "audio/baqarah.mp3"                 # الملف الصوتي المحلي
 
-client = Client(
-    name="my_userbot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    session_string=SESSION_STRING
-)
-
+# ========================================================
+# 3. تشغيل البث
+# ========================================================
+client = Client("quran_bot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
 pytgcalls = PyTgCalls(client)
 
-async def start_stream():
+async def main():
     await client.start()
     await pytgcalls.start()
-    await pytgcalls.play(CHAT_ID, AUDIO_FILE)
-    print(f"🎙️ جاري البث في {CHAT_ID} من {AUDIO_FILE}")
     
-    # ========== السطر المطلوب ==========
-    await idle()  # هذا السطر يبقي البوت شغالاً لأجل غير مسمى
-    # ====================================
+    # التحقق من وجود الملف الصوتي
+    if not os.path.exists(AUDIO_FILE):
+        print(f"❌ خطأ: الملف {AUDIO_FILE} غير موجود!")
+        return
+    
+    # بدء البث في المحطة الصوتية
+    await pytgcalls.play(CHAT_ID, MediaStream(AUDIO_FILE))
+    print(f"🎙️ جاري بث {AUDIO_FILE} في الدردشة {CHAT_ID}")
+    
+    # إرسال رسالة تأكيد (اختياري)
+    await client.send_message(CHAT_ID, "🎙️ **بدء بث القرآن الكريم**")
+    
+    # البقاء شغالاً
+    await idle()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_stream())
+    asyncio.run(main())
