@@ -282,10 +282,43 @@ async def handle_admin(client, message):
         config.user_states[config.OWNER_ID] = "wait_file"
         await message.reply("📂 قم بإرسال الملف الآن:", reply_markup=get_cancel_keyboard())
 
+    # --- الزر القديم المدمج (جلب السجل) ---
     elif text == "جلب السجل":
-        if not config.STORAGE_CHANNEL_ID or not config.assistant_client:
-            return await message.reply("❌ تأكد من تعيين قناة التخزين وربط الحساب المساعد أولاً.")
-        await message.reply("✅ تم فحص القناة وتحديث السجل بنجاح.")
+        if not config.STORAGE_CHANNEL_ID:
+            return await message.reply("❌ لم يتم تعيين قناة تخزين في الإعدادات.")
+            
+        if not config.assistant_client:
+            return await message.reply("❌ الحساب المساعد غير متصل. يرجى إضافة المساعد أولاً ليتمكن من سحب السجل.")
+        
+        msg_wait = await message.reply("⏳ جاري فحص قناة التخزين بواسطة المساعد وبناء ذاكرة البوت...\n(سيتم فحص آخر 1000 رسالة لربط الأيديهات وفصل الصوت عن الفيديو)")
+        
+        count_audio = 0
+        count_video = 0
+        
+        if "audio" not in config.bot_cache: config.bot_cache["audio"] = {}
+        if "video" not in config.bot_cache: config.bot_cache["video"] = {}
+            
+        try:
+            async for m in config.assistant_client.iter_messages(config.STORAGE_CHANNEL_ID, limit=1000):
+                if m.audio or m.video or m.document:
+                    yt_id = m.text if m.text else None
+                    
+                    if yt_id:
+                        yt_id = yt_id.strip()
+                        if len(yt_id) <= 15: 
+                            if m.video:
+                                if yt_id not in config.bot_cache["video"]:
+                                    config.bot_cache["video"][yt_id] = m.id
+                                    count_video += 1
+                            elif m.audio or m.document:
+                                if yt_id not in config.bot_cache["audio"]:
+                                    config.bot_cache["audio"][yt_id] = m.id
+                                    count_audio += 1
+                                
+            config.save_cache()
+            await msg_wait.edit(f"✅ تم الانتهاء من فحص السجل بنجاح!\n\n📥 **تم استخراج وحفظ:**\n🎵 `{count_audio}` مقطع صوتي.\n🎬 `{count_video}` مقطع فيديو.\n\n💡 **البوت الآن يفرق بينهم بدقة وسيجلبهم من القناة مباشرة.**")
+        except Exception as e:
+            await msg_wait.edit(f"❌ حدث خطأ أثناء الجلب، تأكد أن الحساب المساعد موجود كعضو في قناة التخزين: {e}")
 
     # --- زر جلب نسخة احتياطية ---
     elif text == "جلب نسخة احتياطية":
