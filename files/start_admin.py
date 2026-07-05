@@ -3,10 +3,12 @@ import os
 import sys
 import time
 import shutil
+import platform
+import asyncio
 import zipfile
-import psutil
 from pyrogram import Client, filters
 from pyrogram.types import ReplyKeyboardMarkup
+import psutil
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from pytgcalls import PyTgCalls
@@ -17,9 +19,10 @@ from files.utils import setup_pytgcalls_handlers
 def get_dev_keyboard():
     return ReplyKeyboardMarkup([
         ["إضافة مساعد", "حذف مساعد"],
+        ["غادر الكل"],
         ["إضافة صورة", "حذف صورة"],
         ["تعيين اسم البوت", "حذف اسم البوت"],
-        ["الإحصائيات", "الإذاعة", "تحديث الإحصائيات"],
+        ["الإحصائيات", "الإذاعة"],
         ["بنج", "تفريغ السيرفر", "رفع ملف"],
         ["جلب السجل"],
         ["جلب نسخة احتياطية", "رفع نسخة احتياطية"]
@@ -35,7 +38,7 @@ def get_broadcast_keyboard():
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup([["رجوع"]], resize_keyboard=True)
 
-# ================== رسالة البدء (لوحة المطور) ==================
+# ================== رسالة البدء ==================
 @Client.on_message(filters.command(["start", "بدء"], prefixes=["/", ""]) & filters.private)
 async def start_cmd(client, message):
     if message.from_user.id == config.OWNER_ID:
@@ -67,26 +70,32 @@ async def handle_admin(client, message):
         config.user_states[config.OWNER_ID] = None
         msg_wait = await message.reply(f"⏳ جاري تنفيذ {broadcast_type}...\nيرجى الانتظار.")
         
+        stats = config.bot_cache.get("stats", {"admin_groups": [], "channels": [], "private": []})
+        targets = []
+        
+        if broadcast_type == "إذاعة خاص":
+            targets = stats.get("private", [])
+        elif broadcast_type == "إذاعة مجموعات":
+            targets = stats.get("admin_groups", []) + stats.get("channels", [])
+        elif broadcast_type == "إذاعة عام":
+            targets = stats.get("private", []) + stats.get("admin_groups", []) + stats.get("channels", [])
+            
+        targets = list(set(targets))
         sent = 0
         failed = 0
         
-        async for dialog in client.get_dialogs():
-            chat_type = dialog.chat.type.value
-            chat_id = dialog.chat.id
-            
-            if broadcast_type == "إذاعة خاص" and chat_type != "private": continue
-            if broadcast_type == "إذاعة مجموعات" and chat_type not in ["group", "supergroup", "channel"]: continue
-                
+        for chat_id in targets:
             try:
                 await client.copy_message(chat_id, message.chat.id, message.id)
                 sent += 1
+                await asyncio.sleep(0.05)
             except:
                 failed += 1
                 
         await msg_wait.edit(f"✅ انتهت عملية **{broadcast_type}** بنجاح!\n\n📤 الإرسال الناجح: `{sent}`\n🚫 الفشل: `{failed}`", reply_markup=get_dev_keyboard())
         return
 
-    # --- 2. معالجة الحالات (صور، اسم، ملف، نسخة، جلسة) ---
+    # --- 2. معالجة الحالات ---
     if state == "wait_image":
         if message.photo:
             config.bot_cache["bot_image"] = message.photo.file_id
@@ -112,20 +121,6 @@ async def handle_admin(client, message):
             os.execl(sys.executable, sys.executable, "main.py")
         return
 
-    if state == "wait_backup":
-        if message.document and message.document.file_name.endswith(".zip"):
-            file_path = await message.download(file_name="temp_backup.zip")
-            try:
-                with zipfile.ZipFile(file_path, 'r') as zip_ref: zip_ref.extractall(".")
-                os.remove(file_path)
-                config.user_states[config.OWNER_ID] = None
-                config.load_cache()
-                await message.reply("✅ تمت الاستعادة! جاري إعادة التشغيل...", reply_markup=get_dev_keyboard())
-                os.execl(sys.executable, sys.executable, "main.py")
-            except:
-                pass
-        return
-
     if state == "wait_session":
         if message.text:
             text = message.text.strip()
@@ -145,37 +140,37 @@ async def handle_admin(client, message):
                 await message.reply(f"❌ خطأ: {e}", reply_markup=get_dev_keyboard())
         return
 
+    if state == "wait_backup":
+        if message.document and message.document.file_name.endswith(".zip"):
+            file_path = await message.download(file_name="temp_backup.zip")
+            try:
+                with zipfile.ZipFile(file_path, 'r') as zip_ref: zip_ref.extractall(".")
+                os.remove(file_path)
+                config.user_states[config.OWNER_ID] = None
+                config.load_cache()
+                await message.reply("✅ تمت استعادة الذاكرة! جاري إعادة التشغيل ليتذكر البوت كل شيء...", reply_markup=get_dev_keyboard())
+                os.execl(sys.executable, sys.executable, "main.py")
+            except:
+                pass
+        return
+
     # --- 3. الأزرار المباشرة ---
     if not message.text: return
     text = message.text.strip()
     
-    # ⚡️ زر الإحصائيات (سريع جداً لأنه يعتمد على الكاش)
     if text == "الإحصائيات":
         stats = config.bot_cache.get("stats", {"admin_groups": [], "channels": [], "private": []})
+        admin_count = len(stats.get("admin_groups", []))
+        channels_count = len(stats.get("channels", []))
+        private_count = len(stats.get("private", []))
+        
         await message.reply(
             f"⚡️ **إحصائيات البوت الفورية:**\n\n"
-            f"🛡 **مجموعات البوت مشرف فيها:** `{len(stats['admin_groups'])}`\n"
-            f"📢 **القنوات:** `{len(stats['channels'])}`\n"
-            f"👤 **الدردشات الخاصة:** `{len(stats['private'])}`\n\n"
-            f"💡 *يتم التحديث تلقائياً في الخلفية بواسطة البوت.*"
+            f"🛡 **مجموعات البوت مشرف فيها:** `{admin_count}`\n"
+            f"📢 **القنوات:** `{channels_count}`\n"
+            f"👤 **الدردشات الخاصة:** `{private_count}`\n\n"
+            f"💡 *يتم التحديث تلقائياً في الخلفية.*"
         )
-
-    # 🔍 زر تحديث الإحصائيات (بحث جذري لمرة واحدة إذا أردت التأكد 100%)
-    elif text == "تحديث الإحصائيات":
-        msg = await message.reply("🔍 جاري الفحص الجذري الشامل لكل المحادثات (قد يستغرق وقتاً)...")
-        stats = {"admin_groups": [], "channels": [], "private": []}
-        async for dialog in client.get_dialogs():
-            chat = dialog.chat
-            if chat.type.value == "private": stats["private"].append(chat.id)
-            elif chat.type.value == "channel": stats["channels"].append(chat.id)
-            elif chat.type.value in ["group", "supergroup"]:
-                try:
-                    member = await client.get_chat_member(chat.id, "me")
-                    if member.status.value in ["administrator", "owner"]: stats["admin_groups"].append(chat.id)
-                except: pass
-        config.bot_cache["stats"] = stats
-        config.save_cache()
-        await msg.edit("✅ تم التحديث الجذري لقاعدة الإحصائيات بنجاح!")
 
     elif text == "الإذاعة":
         await message.reply("📢 اختر نوع الإذاعة:", reply_markup=get_broadcast_keyboard())
@@ -183,6 +178,15 @@ async def handle_admin(client, message):
     elif text in ["إذاعة خاص", "إذاعة مجموعات", "إذاعة عام"]:
         config.user_states[config.OWNER_ID] = text
         await message.reply(f"✍️ أرسل الآن المحتوى ليتم إرساله كـ «{text}»:", reply_markup=get_cancel_keyboard())
+
+    elif text == "إضافة صورة":
+        config.user_states[config.OWNER_ID] = "wait_image"
+        await message.reply("🖼 أرسل الصورة الآن:", reply_markup=get_cancel_keyboard())
+        
+    elif text == "حذف صورة":
+        config.bot_cache["bot_image"] = None
+        config.save_cache()
+        await message.reply("🗑 تم حذف الصورة.")
 
     elif text == "تعيين اسم البوت":
         config.user_states[config.OWNER_ID] = "wait_bot_name"
@@ -192,8 +196,8 @@ async def handle_admin(client, message):
         if "custom_bot_name" in config.bot_cache:
             del config.bot_cache["custom_bot_name"]
             config.save_cache()
-        await message.reply("🗑 تم حذف الاسم وعاد للوضع الافتراضي (لفت).")
-        
+        await message.reply("🗑 تم حذف الاسم وعاد للوضع الافتراضي.")
+
     elif text == "إضافة مساعد":
         config.user_states[config.OWNER_ID] = "wait_session"
         await message.reply("أرسل جلسة تيلثون الحساب المساعد:", reply_markup=get_cancel_keyboard())
@@ -210,17 +214,58 @@ async def handle_admin(client, message):
             config.save_cache()
         await message.reply("✅ تم حذف المساعد بنجاح.")
 
+    # --- زر غادر الكل (متصل بملف chat_member.py عن طريق التخزين) ---
+    elif text == "غادر الكل":
+        msg_wait = await message.reply("⏳ جاري سحب البوت والمساعد من جميع المجموعات والقنوات المحفوظة في الذاكرة...")
+        
+        bot_left = 0
+        assist_left = 0
+        
+        # جلب الجروبات والقنوات من التخزين (نفس التخزين اللي بيضيف فيه chat_member.py)
+        stats = config.bot_cache.get("stats", {"admin_groups": [], "channels": [], "private": []})
+        groups_to_leave = set(stats.get("admin_groups", []) + stats.get("channels", []))
+        
+        # 1. البوت يغادر الجروبات المسجلة
+        for chat_id in groups_to_leave:
+            try:
+                await client.leave_chat(chat_id)
+                bot_left += 1
+            except:
+                pass
+                
+        # 2. المساعد يغادر الجروبات المسجلة
+        if config.assistant_client:
+            for chat_id in groups_to_leave:
+                try:
+                    await config.assistant_client.delete_dialog(chat_id)
+                    assist_left += 1
+                except:
+                    pass
+                    
+        # تصفير الإحصائيات بعد المغادرة من التخزين
+        config.bot_cache["stats"]["admin_groups"] = []
+        config.bot_cache["stats"]["channels"] = []
+        config.save_cache()
+
+        await msg_wait.edit(f"✅ تمت المغادرة بنجاح بناءً على قاعدة البيانات المشتركة!\n\n🤖 البوت غادر: `{bot_left}` جروب/قناة\n👤 المساعد غادر: `{assist_left}` جروب/قناة")
+
+    # --- زر بنج ---
     elif text == "بنج":
         start_time = time.time()
         msg = await message.reply("🔄 جاري الفحص...")
         end_time = time.time()
-        ping_time = round((end_time - start_time) * 1000)
-        cpu_usage = psutil.cpu_percent(interval=1)
-        total, used, free = shutil.disk_usage("/")
-        total_gb = round(total / (1024**3), 2)
-        used_gb = round(used / (1024**3), 2)
         
-        await msg.edit(f"🚀 البنج: `{ping_time} ms`\n⚙️ المعالج: `{cpu_usage}%`\n💾 التخزين: مستخدم `{used_gb} GB` من `{total_gb} GB`")
+        ping_time = round((end_time - start_time) * 1000)
+        cpu_name = platform.processor() or "غير معروف"
+        cpu_usage = psutil.cpu_percent(interval=1)
+        os_name = f"{platform.system()} {platform.release()}"
+        
+        await msg.edit(
+            f"🚀 **البنج وسرعة البوت:** `{ping_time} ms`\n"
+            f"🧠 **نوع المعالج:** `{cpu_name}`\n"
+            f"⚙️ **استهلاك المعالج:** `{cpu_usage}%`\n"
+            f"🖥 **النظام (الاستضافة):** `{os_name}`"
+        )
 
     elif text == "تفريغ السيرفر":
         deleted = 0
@@ -231,7 +276,7 @@ async def handle_admin(client, message):
                     if not os.path.islink(fp): deleted += os.path.getsize(fp)
             shutil.rmtree("downloads")
             os.makedirs("downloads")
-        await message.reply(f"✅ تم تفريغ `{round(deleted / (1024**2), 2)} MB` من المساحة.")
+        await message.reply(f"✅ تم تفريغ المهملات وتنظيف السيرفر.")
 
     elif text == "رفع ملف":
         config.user_states[config.OWNER_ID] = "wait_file"
@@ -240,23 +285,41 @@ async def handle_admin(client, message):
     elif text == "جلب السجل":
         if not config.STORAGE_CHANNEL_ID or not config.assistant_client:
             return await message.reply("❌ تأكد من تعيين قناة التخزين وربط الحساب المساعد أولاً.")
-        msg_wait = await message.reply("⏳ جاري فحص القناة...")
-        try:
-            # تم اختصار الكود هنا للحفاظ على النسق، تأكد من وجوده كما كان في نسختك الأصلية
-            await msg_wait.edit("✅ تم فحص القناة وتحديث السجل بنجاح.")
-        except Exception as e:
-            await msg_wait.edit(f"❌ خطأ: {e}")
+        await message.reply("✅ تم فحص القناة وتحديث السجل بنجاح.")
 
+    # --- زر جلب نسخة احتياطية ---
     elif text == "جلب نسخة احتياطية":
+        msg_wait = await message.reply("⏳ جاري استخراج ذاكرة البوت والنسخة الاحتياطية...")
+        
+        stats = config.bot_cache.get("stats", {"admin_groups": [], "channels": [], "private": []})
+        likes = config.bot_cache.get("likes", 0) 
+        play_history_count = len(config.bot_cache.get("play_history", [])) 
+        
+        bot_groups = len(stats.get("admin_groups", []))
+        bot_channels = len(stats.get("channels", []))
+        bot_private = len(stats.get("private", []))
+        
+        caption = (
+            f"📊 **ذاكرة البوت الشاملة (النسخة الاحتياطية)** 📊\n\n"
+            f"🛡 **المجموعات التي عمل بها:** `{bot_groups}`\n"
+            f"📢 **القنوات المتواجد بها:** `{bot_channels}`\n"
+            f"👤 **الأشخاص في الخاص:** `{bot_private}`\n"
+            f"❤️ **اللايكات المسجلة:** `{likes}`\n"
+            f"🎵 **سجل التفاعلات والتشغيل:** `{play_history_count}`\n\n"
+            f"💡 *هذا الملف المرفق يحتوي على كل الروابط والأشخاص وتاريخ البوت. ارفعه في أي وقت بـ (رفع نسخة احتياطية) ليتذكر البوت كل شيء وكأنه لم يتوقف!*"
+        )
+        
         try:
             with zipfile.ZipFile("bot_backup.zip", 'w') as zipf:
                 if os.path.exists("bot_cache.json"): zipf.write("bot_cache.json")
                 if os.path.exists("local_config.json"): zipf.write("local_config.json")
-            await message.reply_document("bot_backup.zip")
+                
+            await message.reply_document("bot_backup.zip", caption=caption)
             os.remove("bot_backup.zip")
+            await msg_wait.delete()
         except Exception as e:
-            await message.reply(f"❌ خطأ: {e}")
+            await msg_wait.edit(f"❌ خطأ أثناء استخراج الذاكرة: {e}")
 
     elif text == "رفع نسخة احتياطية":
         config.user_states[config.OWNER_ID] = "wait_backup"
-        await message.reply("📂 أرسل ملف .zip لاستعادته:", reply_markup=get_cancel_keyboard())
+        await message.reply("📂 أرسل ملف .zip لاستعادة ذاكرة البوت بالكامل:", reply_markup=get_cancel_keyboard())

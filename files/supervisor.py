@@ -1,133 +1,168 @@
-# files/supervisor.py
-
+# files/supervisor.py (أو chat_member.py حسب ما سميته)
+import os
 from pyrogram import Client, filters
-from pyrogram.enums import ChatMemberStatus, ChatMembersFilter
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import ChatMemberUpdated, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.enums import ChatMemberStatus, ChatType
 from files import config
 
-@Client.on_chat_member_updated(filters.group)
-async def bot_added_or_promoted(client, update):
-    user = update.new_chat_member.user if update.new_chat_member else (update.old_chat_member.user if update.old_chat_member else None)
-    if not user or not user.is_self:
+@Client.on_chat_member_updated(filters.group | filters.channel)
+async def bot_added_or_promoted(client: Client, event: ChatMemberUpdated):
+    # 1. حل مشكلة الـ NoneType (عشان لو العضو انطرد أو غادر)
+    member = event.new_chat_member or event.old_chat_member
+    if not member or not member.user:
+        return
+        
+    bot = await client.get_me()
+    if member.user.id != bot.id:
         return
 
-    old_status = update.old_chat_member.status if update.old_chat_member else None
-    new_status = update.new_chat_member.status if update.new_chat_member else None
-    chat = update.chat
+    chat = event.chat
+    new_status = event.new_chat_member.status if event.new_chat_member else None
+    old_status = event.old_chat_member.status if event.old_chat_member else None
+    promoter = event.from_user
 
-    if new_status == ChatMemberStatus.MEMBER and old_status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-        warning_text = "لقد قمت بإضافة البوت كعضو لا يمكن للبوت البقاء، الرجاء إدخال البوت كمشرف للاستمرار في العمل."
+    # تهيئة التخزين
+    if "stats" not in config.bot_cache:
+        config.bot_cache["stats"] = {"admin_groups": [], "channels": [], "private": []}
+    stats = config.bot_cache["stats"]
+
+    # ==========================================
+    # أولاً: لو البوت اترفع مشرف (تم تفعيله)
+    # ==========================================
+    if new_status == ChatMemberStatus.ADMINISTRATOR:
+        
+        # --- الحفظ في الإحصائيات للتخزين والإذاعة ---
+        if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            if chat.id not in stats["admin_groups"]:
+                stats["admin_groups"].append(chat.id)
+        elif chat.type == ChatType.CHANNEL:
+            if chat.id not in stats["channels"]:
+                stats["channels"].append(chat.id)
+        config.save_cache()
+
+        # --- إرسال رسالة ترحيبية في الجروب نفسه ---
+        if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            user_link = f"[{promoter.first_name}](tg://user?id={promoter.id})" if promoter else "أحد المشرفين"
+            
+            # حل مشكلة زر المطور باستخدام user_id بدلاً من url
+            dev_button = InlineKeyboardMarkup([
+                [InlineKeyboardButton("👨‍💻 تواصل مع المطور", user_id=config.OWNER_ID)]
+            ])
+            try:
+                await client.send_message(
+                    chat.id,
+                    f"✅ **تم تفعيل البوت بنجاح!**\n\n"
+                    f"👤 بواسطة: {user_link}\n"
+                    f"💡 أنا الآن جاهز لتشغيل الصوتيات والمرئيات.\n"
+                    f"📞 إذا واجهت أي مشكلة، لا تتردد في مراسلة المطور من الزر بالأسفل.",
+                    reply_markup=dev_button,
+                    disable_web_page_preview=True
+                )
+            except:
+                pass 
+
+        # --- إرسال إشعار للمطور بالصورة والتفاصيل ---
         try:
-            await client.send_message(chat.id, warning_text)
-            await client.leave_chat(chat.id)
-            if hasattr(config, "assistant_client") and config.assistant_client:
-                if hasattr(config, "call_py") and config.call_py:
-                    await config.call_py.leave_call(chat.id)
-                from telethon.functions.channels import LeaveChannelRequest
-                await config.assistant_client(LeaveChannelRequest(chat.id))
-        except:
-            pass
-        return
+            # نجلب بيانات الجروب بالكامل عشان نضمن وجود الصورة لو متاحة
+            full_chat = await client.get_chat(chat.id)
+            chat_type_text = "المجموعة" if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] else "القناة"
+            
+            # محاولة جلب رابط الجروب
+            chat_link = full_chat.invite_link
+            if not chat_link and chat.username:
+                chat_link = f"https://t.me/{chat.username}"
+            
+            # تجهيز الأزرار (رابط الجروب + المالك) واستخدام user_id
+            buttons = []
+            row = []
+            if chat_link:
+                row.append(InlineKeyboardButton(f"🔗 رابط {chat_type_text}", url=chat_link))
+            if promoter:
+                row.append(InlineKeyboardButton("👤 المالك/المُفَعِّل", user_id=promoter.id))
+            
+            if row:
+                buttons.append(row)
+                
+            reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+            
+            caption = (
+                f"🎉 **تم تفعيل البوت في {chat_type_text} جديدة!**\n\n"
+                f"📝 **اسم {chat_type_text}:** `{chat.title}`\n"
+                f"🆔 **الآيدي:** `{chat.id}`\n"
+            )
+            if promoter:
+                caption += f"👤 **تم الرفع بواسطة:** [{promoter.first_name}](tg://user?id={promoter.id})\n"
 
-    if old_status == ChatMemberStatus.ADMINISTRATOR and new_status != ChatMemberStatus.ADMINISTRATOR:
-        leave_text = f"⚙️ **غادر البوت مجموعة:**\n\n📌 **الاسم:** {chat.title}\n🆔 **الايدي:** `{chat.id}`\n⚠️ **السبب:** تم تنزيله من الإشراف أو طرده."
-        try:
-            await client.send_message(config.OWNER_ID, leave_text)
-        except:
-            pass
+            # محاولة جلب صورة الجروب بدقة
+            photo_path = None
+            if full_chat.photo:
+                photo_path = await client.download_media(full_chat.photo.big_file_id)
 
+            if photo_path:
+                await client.send_photo(
+                    config.OWNER_ID,
+                    photo=photo_path,
+                    caption=caption,
+                    reply_markup=reply_markup
+                )
+                os.remove(photo_path) # مسح الصورة بعد إرسالها
+            else:
+                await client.send_message(
+                    config.OWNER_ID,
+                    text=caption,
+                    reply_markup=reply_markup
+                )
+        except Exception as e:
+            print(f"Error in dev notification: {e}")
+
+    # ==========================================
+    # ثانياً: لو البوت نزل من الإشراف أو انضاف كعضو عادي
+    # ==========================================
+    elif new_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED, ChatMemberStatus.BANNED, ChatMemberStatus.LEFT, None]:
+        
+        # --- الإزالة من الإحصائيات فوراً ---
+        if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            if chat.id in stats["admin_groups"]:
+                stats["admin_groups"].remove(chat.id)
+        elif chat.type == ChatType.CHANNEL:
+            if chat.id in stats["channels"]:
+                stats["channels"].remove(chat.id)
+        config.save_cache()
+
+        # --- المغادرة التلقائية لو كان مجرد "عضو عادي" ---
         if new_status == ChatMemberStatus.MEMBER:
             try:
-                await client.send_message(chat.id, "⚠️ تم تنزيلي من الإشراف، لا يمكنني البقاء كعضو عادي. سأغادر الآن.")
+                if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                    await client.send_message(
+                        chat.id, 
+                        "❌ لا يمكنني العمل كعضو عادي، يجب رفعي مشرفاً بصلاحيات كاملة.\nسأغادر الآن، ارفعني مشرف ثم أضفني مجدداً."
+                    )
                 await client.leave_chat(chat.id)
-                if hasattr(config, "assistant_client") and config.assistant_client:
-                    if hasattr(config, "call_py") and config.call_py:
-                        await config.call_py.leave_call(chat.id)
-                    from telethon.functions.channels import LeaveChannelRequest
-                    await config.assistant_client(LeaveChannelRequest(chat.id))
             except:
                 pass
-        return
-
-    if new_status == ChatMemberStatus.ADMINISTRATOR and old_status != ChatMemberStatus.ADMINISTRATOR:
-        
-        dev_url = None
-        try:
-            dev_user = await client.get_users(config.OWNER_ID)
-            if dev_user.username:
-                dev_url = f"https://t.me/{dev_user.username}"
-        except:
-            pass
-
-        group_photo_id = chat.photo.big_file_id if chat.photo else None
-        
-        owner_url = None
-        owner_mention = "غير معروف"
-        try:
-            async for admin in client.get_chat_members(chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
-                if admin.status == ChatMemberStatus.OWNER:
-                    owner_mention = admin.user.mention
-                    if admin.user.username:
-                        owner_url = f"https://t.me/{admin.user.username}"
-                    break
-        except:
-            pass
-
-        # 🔴 التعديل هنا: جلب يوزر الجروب أو إنشاء رابط دعوة "جديد" لتجنب انتهاء الصلاحية
-        group_link = None
-        try:
-            if chat.username:
-                group_link = f"https://t.me/{chat.username}"
-            else:
-                invite = await client.create_chat_invite_link(chat.id)
-                group_link = invite.invite_link
-        except:
-            pass
-
-        text_group = f"🌹 **شكراً لتفعيل البوت في مجموعة ( {chat.title} )**\n\nأنا الآن مشرف وجاهز للعمل، يمكنك استخدام الأوامر الآن بكل حرية 🎧\n👤 **للتواصل مع المطور:** [اضغط هنا](tg://user?id={config.OWNER_ID})"
-        
-        group_buttons = []
-        if dev_url:
-            group_buttons.append([InlineKeyboardButton("المطور", url=dev_url)])
-        group_markup = InlineKeyboardMarkup(group_buttons) if group_buttons else None
-        
-        try:
-            if group_photo_id:
-                try:
-                    await client.send_photo(chat.id, photo=group_photo_id, caption=text_group, reply_markup=group_markup)
-                except:
-                    await client.send_message(chat.id, text_group, reply_markup=group_markup)
-            else:
-                await client.send_message(chat.id, text_group, reply_markup=group_markup)
-        except:
-            pass
             
-        dev_text = (
-            f"🚀 **تم تفعيل البوت في مجموعة جديدة!**\n\n"
-            f"📌 **الاسم:** {chat.title}\n"
-            f"🆔 **الايدي:** `{chat.id}`\n"
-            f"👤 **المالك:** {owner_mention}\n"
-        )
-        if group_link:
-            dev_text += f"🔗 **الرابط:** متاح في الزر بالأسفل"
-        else:
-            dev_text += "🔗 **الرابط:** (لا أملك صلاحية لإنشاء رابط)"
-        
-        dev_buttons = []
-        if group_link:
-            dev_buttons.append(InlineKeyboardButton("الجروب", url=group_link))
-        if owner_url:
-            dev_buttons.append(InlineKeyboardButton("مالك الجروب", url=owner_url))
-            
-        dev_markup = InlineKeyboardMarkup([dev_buttons]) if dev_buttons else None
-        
-        try:
-            if group_photo_id:
-                try:
-                    await client.send_photo(config.OWNER_ID, photo=group_photo_id, caption=dev_text, reply_markup=dev_markup)
-                except:
-                    await client.send_message(config.OWNER_ID, dev_text, reply_markup=dev_markup)
-            else:
-                await client.send_message(config.OWNER_ID, dev_text, reply_markup=dev_markup)
-        except:
-            pass
+        # --- إشعار الغدر/التنزيل (يصل للمطور فقط إذا كان البوت مشرفاً قبل ذلك) ---
+        if old_status == ChatMemberStatus.ADMINISTRATOR:
+            try:
+                full_chat = await client.get_chat(chat.id)
+                chat_type_text = "مجموعة" if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] else "قناة"
+                
+                chat_link = full_chat.invite_link
+                if not chat_link and chat.username:
+                    chat_link = f"https://t.me/{chat.username}"
+                
+                buttons = []
+                if chat_link:
+                    buttons.append([InlineKeyboardButton(f"🔗 رابط {chat_type_text}", url=chat_link)])
+                reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+                
+                await client.send_message(
+                    config.OWNER_ID,
+                    f"⚠️ **تنبيه غدر وتم إيقاف التفعيل:**\n\n"
+                    f"تم تنزيل البوت من الإشراف أو طرده من {chat_type_text}:\n"
+                    f"**{chat.title}** (`{chat.id}`)\n\n"
+                    f"✅ **تم مسح {chat_type_text} من التخزين تلقائياً والمغادرة.**",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                print(f"Error in demotion notification: {e}")
