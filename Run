@@ -1,0 +1,4 @@
+sudo apt-get update -y
+sudo apt-get install ffmpeg redis-server -y
+sudo service redis-server start
+python3 -m pip install -r requirements.txt
