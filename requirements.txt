@@ -1,6 +1,7 @@
 Pyrogram==2.0.106
 py-tgcalls==2.2.11
 tgcrypto
+telethon
 requests
 yt_dlp
 youtube_search
