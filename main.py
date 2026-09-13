@@ -1,5 +1,14 @@
 import time, redis, os, json, re, requests, asyncio, sys
 from pyrogram import *
+
+# ===== قيم ثابتة (Hardcoded) بدل متغيرات البيئة — للاستضافة اللي مفيهاش خاصية تخزين متغيرات =====
+os.environ['BOT_TOKEN'] = '8684384582:AAFz2AHkIRxPIDEB_hY6Zx_zldcIWiBrDK4'
+os.environ['SUDO_ID'] = '7532687479'
+os.environ['STORAGE_CHANNEL'] = 'djhdkdndkdjdkddkfj'
+os.environ['REDIS_HOST'] = 'classic-grub-153966.upstash.io'
+os.environ['REDIS_PORT'] = '6379'
+os.environ['REDIS_PASSWORD'] = 'gQAAAAAAAlluAAIgcDE1NTUzZjRmOWIyMWQ0ZDE1YjMwMjk1NmYxY2EyODZmZg'
+
 r = redis.Redis(
     host=os.environ.get('REDIS_HOST', 'localhost'),
     port=int(os.environ.get('REDIS_PORT', 6379)),
@@ -61,8 +70,14 @@ def _ensure_pytgcalls_importable(max_tries=50):
 _ensure_pytgcalls_importable()
 
 to_config = """
-import redis
-r = redis.Redis('localhost',decode_responses=True)
+import redis, os
+r = redis.Redis(
+    host=os.environ.get('REDIS_HOST', 'classic-grub-153966.upstash.io'),
+    port=int(os.environ.get('REDIS_PORT', 6379)),
+    password=os.environ.get('REDIS_PASSWORD', 'gQAAAAAAAlluAAIgcDE1NTUzZjRmOWIyMWQ0ZDE1YjMwMjk1NmYxY2EyODZmZg'),
+    ssl=True,
+    decode_responses=True
+)
 """
 
 print('''
